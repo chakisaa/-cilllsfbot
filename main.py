@@ -1,29 +1,58 @@
 import os
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import asyncio
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from pytgcalls import PyTgCalls
+from pytgcalls.types import AudioPiped
+import yt_dlp
 
-TOKEN = os.getenv("BOT_TOKEN")
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+STRING_SESSION = os.getenv("STRING_SESSION")
 
-logging.basicConfig(level=logging.INFO)
+bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+assistant = Client("assistant", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
+call = PyTgCalls(assistant)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Halo! Aku cilllsfbot 🎵\n"
-        "Ketik /play <judul lagu> buat coba.\n"
-        "Contoh: /play taylor swift"
-    )
+@bot.on_message(filters.command("start"))
+async def start(_, m: Message):
+    await m.reply_text("Halo! Aku cilllsfbot 🎵\nKetik /play <judul lagu> buat muterin lagu di VC.\nContoh: /play sadrah")
 
-async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Ketik judulnya, contoh: /play taylor swift")
-        return
-    judul = " ".join(context.args)
-    await update.message.reply_text(f"Siap! Lagi nyari lagu: {judul}...\n\nIni versi awal botnya, nanti kita upgrade biar bisa masuk Voice Chat ya.")
+@bot.on_message(filters.command("play") & filters.group)
+async def play(_, m: Message):
+    if len(m.command) < 2:
+        return await m.reply_text("Ketik judulnya, contoh: /play taylor swift")
+    query = " ".join(m.command[1:])
+    chat_id = m.chat.id
+        msg = await m.reply_text(f"Siap! Lagi nyari lagu: {query}...")
+    try:
+        ydl_opts = {"format": "bestaudio/best", "noplaylist": True, "quiet": True, "default_search": "ytsearch"}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(query, download=False)
+            if "entries" in info:
+                info = info["entries"][0]
+            url = info["url"]
+            title = info.get("title", query)
+        await call.play(chat_id, AudioPiped(url))
+        await msg.edit_text(f"🎵 Sekarang muter: {title}")
+    except Exception as e:
+        await msg.edit_text(f"Gagal masuk VC: {e}")
+
+@bot.on_message(filters.command(["stop", "end"]) & filters.group)
+async def stop(_, m: Message):
+    try:
+        await call.leave_call(m.chat.id)
+        await m.reply_text("Udah berhenti 👋")
+    except:
+        await m.reply_text("Lagi gak muter lagu kok.")
+
+async def main():
+    await bot.start()
+    await assistant.start()
+    await call.start()
+    print("Bot jalan...")
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("play", play))
-    print("Bot jalan...")
-    app.run_polling()
+    asyncio.run(main())
